@@ -1,0 +1,118 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  Lab 4: one EC2 instance running the course lab04-service container, plus the
+  security group that makes it reachable. Deploy it, break it, fix it, delete it.
+
+Parameters:
+
+  ImageUrl:
+    Type: String
+    # For this lab, the course publishes one public image and every student
+    # deploys the same one.
+    Default: ghcr.io/cmu-17-214/lab04-service:latest
+    Description: Public container image to run on the instance.
+
+  ServicePort:
+    Type: Number
+    Default: 8080
+    MinValue: 1024
+    MaxValue: 65535
+    Description: >
+      The port the security group opens and the host forwards. Change it here
+      and the ingress rule, the port mapping, and the output URL all follow.
+
+  PortOverride:
+    Type: String
+    Default: ""
+    Description: >
+      Overrides the PORT environment variable passed to the container. Leave
+      empty for a healthy deploy. Scenario 2 uses this.
+
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Public SSM parameter that resolves to the current Amazon Linux 2023 AMI.
+
+Resources:
+
+  # Opens exactly the service port to the internet, and nothing else inbound.
+  # Outbound stays at the EC2 default of all traffic allowed, which is what the
+  # instance needs to install Docker and pull the image.
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Inbound access to the lab04 service port.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ServicePort
+          ToPort: !Ref ServicePort
+          CidrIp: 0.0.0.0/0
+          Description: Service port, open to the internet for the external health check.
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH fallback with the lab key, in case an SSM session will not open.
+      Tags:
+        - Key: Name
+          Value: lab04-service
+        - Key: course
+          Value: "17-214"
+
+  ServiceInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref AmiId
+      SecurityGroupIds:
+        - !GetAtt ServiceSecurityGroup.GroupId
+      # Standard AWS Academy Learner Lab profile. It carries the SSM permissions
+      # that let you open a session on the instance without a key pair.
+      IamInstanceProfile: LabInstanceProfile
+      # The Learner Lab's provided key pair, for the SSH fallback.
+      KeyName: vockey
+      Tags:
+        - Key: Name
+          Value: lab04-service
+        - Key: course
+          Value: "17-214"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+
+          # Install the container runtime and start it on boot. ec2-user joins
+          # the docker group so the SSH fallback can run docker without sudo.
+          dnf install -y docker
+          systemctl enable --now docker
+          usermod -a -G docker ec2-user
+
+          # Lab guard: stop the instance after four hours so an abandoned deploy
+          # stops burning credits. The stack stays deletable afterwards.
+          shutdown -h +240
+
+          # The container binds PortOverride when it is set, ServicePort otherwise.
+          EFFECTIVE_PORT="${PortOverride}"
+          if [ -z "$EFFECTIVE_PORT" ]; then
+            EFFECTIVE_PORT="${ServicePort}"
+          fi
+
+          # The host mapping always forwards ServicePort, the port the security
+          # group opens. Traffic reaches the container on ServicePort.
+          docker run -d \
+            --name lab04-service \
+            --restart unless-stopped \
+            -p ${ServicePort}:${ServicePort} \
+            -e PORT="$EFFECTIVE_PORT" \
+            ${ImageUrl}
+
+Outputs:
+
+  ServiceUrl:
+    Description: Public URL of the service. Health check is at /api/health.
+    Value: !Sub "http://${ServiceInstance.PublicDnsName}:${ServicePort}"
+
+  InstanceId:
+    Description: Instance id, for `aws ssm start-session --target <id>`.
+    Value: !Ref ServiceInstance

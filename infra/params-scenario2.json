@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "ImageUrl",
+    "ParameterValue": "ghcr.io/cmu-17-214/lab04-service:latest"
+  },
+  {
+    "ParameterKey": "ServicePort",
+    "ParameterValue": "8080"
+  },
+  {
+    "ParameterKey": "PortOverride",
+    "ParameterValue": "9090"
+  }
+]
