@@ -23,11 +23,11 @@ InstanceId  i-0c4fbc0756b4539ab
 ServiceUrl  http://ec2-54-208-41-71.compute-1.amazonaws.com:8080
 ```
 
-**Healthy redeploy after the fix** (`params-healthy.json`):
+**Healthy redeploy after the fix** (`params-scenario2.json` edited to PortOverride=8080):
 
 ```
-InstanceId  i-0b0062613879ba9c3
-ServiceUrl  http://ec2-3-91-29-75.compute-1.amazonaws.com:8080
+InstanceId  i-07356e065bbf03010
+ServiceUrl  http://ec2-34-201-111-115.compute-1.amazonaws.com:8080
 ```
 
 ## 2. External health check
@@ -82,13 +82,14 @@ listening on and the connection failed. `docker ps` shows the mapping is
 `listening on 8080`. The cause was `PortOverride=9090` in
 `infra/params-scenario2.json`, which the template passes into the container as
 `PORT=9090`. The fix was to delete the stack and create it again with
-`infra/params-healthy.json`, where `PortOverride` is empty, so `PORT` falls back to
-`ServicePort` (8080) and matches the forwarding.
+`infra/params-scenario2.json` after changing it to `PortOverride=8080`, so the
+firewall opens 8080, the wire goes VM 8080 → container 8080, and the app listens on
+8080.
 
 **The healthy curl after the fix:**
 
 ```
-$ curl http://ec2-3-91-29-75.compute-1.amazonaws.com:8080/api/health
+$ curl http://ec2-34-201-111-115.compute-1.amazonaws.com:8080/api/health
 {"status":"ok"}
 ```
 
